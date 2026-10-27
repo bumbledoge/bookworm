@@ -1,0 +1,228 @@
+// Book Worm data model.
+//
+// Local development uses SQLite (zero setup). To use PostgreSQL, change the
+// datasource provider below to "postgresql" and set DATABASE_URL accordingly
+// (see .env.example). The model is intentionally free of provider-specific
+// features (no native enums / scalar lists) so it works on both.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// role:   CUSTOMER | ADMIN
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  role          String   @default("CUSTOMER")
+  giftPoints    Int      @default(0)
+  walletBalance Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  addresses Address[]
+  reviews   Review[]
+  cartItems CartItem[]
+  orders    Order[]
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  userId     String
+  label      String   @default("Home")
+  fullName   String
+  phone      String
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  country    String   @default("US")
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Author {
+  id          String   @id @default(cuid())
+  name        String
+  bio         String
+  photoUrl    String?
+  nationality String?
+  birthYear   Int?
+  createdAt   DateTime @default(now())
+
+  books Book[]
+}
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  slug        String  @unique
+  description String?
+  imageUrl    String?
+
+  books Book[]
+}
+
+// format:        PAPERBACK | HARDCOVER | EBOOK
+// Featured flags drive the home page sections:
+//   isRecommended -> "Recommended for You"
+//   isBestseller  -> "Bestsellers this Month"
+//   isNewLaunch   -> "New Launches"
+model Book {
+  id              String   @id @default(cuid())
+  title           String
+  subtitle        String?
+  description     String
+  isbn            String   @unique
+  authorId        String
+  categoryId      String
+  publisher       String
+  language        String   @default("English")
+  format          String   @default("PAPERBACK")
+  price           Float
+  originalPrice   Float?
+  stock           Int      @default(0)
+  pages           Int?
+  coverUrl        String?
+  publicationDate DateTime
+  totalSales      Int      @default(0)
+  avgRating       Float    @default(0)
+  ratingCount     Int      @default(0)
+  isRecommended   Boolean  @default(false)
+  isBestseller    Boolean  @default(false)
+  isNewLaunch     Boolean  @default(false)
+  deliveryDays    Int      @default(4)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  author     Author      @relation(fields: [authorId], references: [id])
+  category   Category    @relation(fields: [categoryId], references: [id])
+  reviews    Review[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([authorId])
+  @@index([categoryId])
+  @@index([title])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  bookId    String
+  userId    String
+  rating    Int // 1..5
+  title     String?
+  comment   String
+  helpful   Int      @default(0)
+  createdAt DateTime @default(now())
+
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, userId])
+  @@index([bookId])
+}
+
+// Cart rows belong either to a registered user (userId) or to a guest
+// session (guestId, issued by the guest-session endpoint). Exactly one of the
+// two is set; enforced in the service layer.
+model CartItem {
+  id        String   @id @default(cuid())
+  userId    String?
+  guestId   String?
+  bookId    String
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book Book  @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@unique([guestId, bookId])
+  @@index([userId])
+  @@index([guestId])
+}
+
+// status:        PLACED | PROCESSING | SHIPPED | DELIVERED | CANCELLED
+// paymentMethod: CREDIT_CARD | DEBIT_CARD | UPI | WALLET | GIFT_POINTS
+// paymentStatus: PAID | REFUNDED | FAILED
+// Orders can be cancelled within 48 hours of `placedAt` (cancellableUntil).
+model Order {
+  id                String    @id @default(cuid())
+  orderNumber       String    @unique
+  userId            String?
+  guestEmail        String?
+  status            String    @default("PLACED")
+  subtotal          Float
+  tax               Float
+  shipping          Float
+  discount          Float     @default(0)
+  total             Float
+  couponCode        String?
+  pointsRedeemed    Int       @default(0)
+  paymentMethod     String
+  paymentStatus     String    @default("PAID")
+  paymentReference  String?
+  shipFullName      String
+  shipPhone         String
+  shipLine1         String
+  shipLine2         String?
+  shipCity          String
+  shipState         String
+  shipPostalCode    String
+  shipCountry       String
+  estimatedDelivery DateTime
+  placedAt          DateTime  @default(now())
+  cancellableUntil  DateTime
+  cancelledAt       DateTime?
+  cancelReason      String?
+  updatedAt         DateTime  @updatedAt
+
+  user  User?       @relation(fields: [userId], references: [id])
+  items OrderItem[]
+
+  @@index([userId])
+}
+
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String
+  bookId    String
+  title     String // snapshot at purchase time
+  unitPrice Float
+  quantity  Int
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  book  Book  @relation(fields: [bookId], references: [id])
+
+  @@index([orderId])
+  @@index([bookId])
+}
+
+// discountType: PERCENT | FIXED
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  description    String
+  discountType   String
+  discountValue  Float
+  minOrderAmount Float     @default(0)
+  maxDiscount    Float?
+  expiresAt      DateTime?
+  usageLimit     Int?
+  usedCount      Int       @default(0)
+  isActive       Boolean   @default(true)
+}
